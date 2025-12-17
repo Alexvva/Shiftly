@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Planning Pro</title>
+
+  <link rel="manifest" href="./manifest.webmanifest">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Planning Pro">
+  <link rel="apple-touch-icon" href="./icons/icon-180.png">
+
+<style>
+    :root{--bg:#0f172a;--card:#020617;--text:#e5e7eb;--muted:#94a3b8;--accent:#2563eb}
+    body.light{--bg:#f8fafc;--card:#ffffff;--text:#020617;--muted:#475569}
+    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:var(--bg);color:var(--text)}
+    header{padding:20px 16px 12px;background:var(--card)}
+    header h1{margin:0;font-size:1.4rem}
+    header small{color:var(--muted)}
+    nav{display:flex;justify-content:space-around;position:fixed;bottom:0;width:100%;background:var(--card);padding:8px 0;border-top:1px solid rgba(255,255,255,.05)}
+    nav button{background:none;border:none;color:var(--text);font-size:1rem;display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer}
+    nav button span{font-size:.85rem}
+    main{padding:16px;padding-bottom:110px}
+
+    .card{background:var(--card);border-radius:16px;padding:16px;margin-bottom:16px}
+    .row{display:flex;justify-content:space-between;align-items:center;gap:12px}
+    .row-nowrap{display:flex;gap:12px;align-items:flex-end;flex-wrap:nowrap}
+    .row-nowrap > div{flex:1;min-width:0}
+    .badge{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:8px;transform:translateY(-1px)}
+
+    .fab{position:fixed;bottom:110px;right:16px;width:56px;height:56px;border-radius:50%;background:var(--accent);color:#fff;border:none;font-size:2rem;cursor:pointer}
+
+    input,select{width:100%;padding:10px;margin-bottom:12px;border-radius:10px;border:1px solid #ccc}
+    button.primary{width:100%;padding:12px;border-radius:12px;border:none;background:var(--accent);color:#fff;font-size:1rem;cursor:pointer}
+    button.secondary{width:100%;padding:12px;border-radius:12px;border:1px solid rgba(255,255,255,.2);background:transparent;color:var(--text);font-size:1rem;cursor:pointer}
+
+    .iconstack{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+    .iconbtn{
+      width:36px;height:36px;border-radius:12px;
+      border:1px solid rgba(255,255,255,.15);
+      background:transparent;color:var(--text);
+      display:flex;align-items:center;justify-content:center;
+      font-size:16px;line-height:1;cursor:pointer
+    }
+    body.light .iconbtn{border-color:rgba(2,6,23,.15)}
+    .iconbtn.danger{border-color:rgba(220,38,38,.35);color:#dc2626}
+
+    .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px;z-index:999}
+    .modal-content{background:var(--card);width:100%;max-width:560px;max-height:85%;border-radius:20px;padding:20px;overflow:auto}
+    .modal-header{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+    .modal-header h3{margin:0;font-size:1.1rem}
+    .close-modal{background:none;border:none;color:#dc2626;font-size:20px;cursor:pointer}
+
+    .color-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:14px;margin-bottom:20px}
+    .color-choice{width:100%;padding-top:24%;border-radius:50%;border:2px solid transparent;cursor:pointer}
+    .color-choice.selected{border-color:#fff}
+
+    details.filters{margin-top:12px}
+    details.filters summary{cursor:pointer;list-style:none;color:var(--muted);font-weight:600;margin-bottom:8px}
+    details.filters summary::-webkit-details-marker{display:none}
+
+    h4{margin:16px 0 8px}
+    small{color:var(--muted)}
+  </style>
+</head>
+<body>
+<header>
+  <h1 id="appTitle">Planning Pro</h1>
+  <small>Tableau de bord</small>
+</header>
+
+<main id="content"></main>
+
+<nav>
+  <button onclick="showHome()">🏠<span>Accueil</span></button>
+  <button onclick="showPlanning()">📅<span>Planning</span></button>
+  <button onclick="showClients()">👥<span>Clients</span></button>
+  <button onclick="showBilling()">💶<span>Facturation</span></button>
+  <button onclick="showSettings()">⚙️<span>Réglages</span></button>
+</nav>
+
+<script>
+  const K={clients:'clients',shifts:'shifts',billing:'billing',settings:'settings'};
+  const COLORS=['#2563eb','#16a34a','#dc2626','#d97706','#7c3aed','#0d9488','#db2777','#475569'];
+
+  const content=document.getElementById('content');
+  const get=(k)=>JSON.parse(localStorage.getItem(k)||'[]');
+  const set=(k,v)=>localStorage.setItem(k,JSON.stringify(v));
+
+  function applySettings(){
+    const s=JSON.parse(localStorage.getItem(K.settings)||'{}');
+    document.getElementById('appTitle').innerText=s.appName||'Planning Pro';
+    document.body.classList.toggle('light',s.theme==='light');
+  }
+
+  function ensureFab(onclickJs){
+    const existing=document.querySelector('.fab');
+    if(existing) existing.remove();
+    if(onclickJs){
+      document.body.insertAdjacentHTML('beforeend', `<button class="fab" onclick="${onclickJs}">+</button>`);
+    }
+  }
+
+  /* HOME */
+  function showHome(){
+    content.innerHTML='<div class="card"><strong>Accueil</strong><br/><small>Dashboard en cours</small></div>';
+    ensureFab(null);
+  }
+
+  /* CLIENTS */
+  function showClients(){
+    const clients=get(K.clients);
+    let html='';
+    clients.forEach((c,i)=>{
+      html+=`
+        <div class="card">
+          <div class="row">
+            <div>
+              <span class="badge" style="background:${c.color||COLORS[0]}"></span><strong>${c.name||'(Sans nom)'}</strong><br/>
+              <small>SIRET : ${c.siret||'-'}</small><br/>
+              <small>Email : ${c.email||'-'}</small>
+            </div>
+            <div class="iconstack">
+              <button class="iconbtn" aria-label="Modifier" onclick="openClientModal(${i})">✎</button>
+              <button class="iconbtn danger" aria-label="Supprimer" onclick="openDeleteClientModal(${i})">🗑</button>
+            </div>
+          </div>
+        </div>`;
+    });
+    content.innerHTML=html||'<div class="card"><small>Aucun client</small></div>';
+    ensureFab('openClientModal()');
+  }
+
+  function openClientModal(index=null){
+    const clients=get(K.clients);
+    const c=(index!==null && clients[index]) ? clients[index] : {};
+    let selectedColor=c.color||COLORS[0];
+
+    const modal=document.createElement('div');
+    modal.className='modal';
+    modal.onclick=e=>{ if(e.target===modal) modal.remove(); };
+
+    modal.innerHTML=`
+      <div class="modal-content">
+        <div class="modal-header">
+          <button class="close-modal" onclick="this.closest('.modal').remove()">✕</button>
+          <h3>${index===null ? 'Nouveau client' : 'Modifier - ' + (c.name||'')}</h3>
+        </div>
+
+        <h4>Informations</h4>
+        <input id="clName" placeholder="Nom de l'entreprise" value="${c.name||''}" />
+        <input id="clSiret" placeholder="SIRET" value="${c.siret||''}" />
+        <input id="clRate" placeholder="Taux horaire (€)" value="${c.rate||''}" />
+
+        <h4>Contact</h4>
+        <input id="clPhone" placeholder="Téléphone" value="${c.phone||''}" />
+        <input id="clEmail" placeholder="Email" value="${c.email||''}" />
+
+        <h4>Adresse</h4>
+        <input id="clAddress" placeholder="Adresse postale" value="${c.address||''}" />
+        <div class="row" style="align-items:center">
+          <input id="clZip" placeholder="Code postal" value="${c.zip||''}" />
+          <input id="clCity" placeholder="Ville" value="${c.city||''}" />
+        </div>
+
+        <h4>Couleur</h4>
+        <div class="color-grid">
+          ${COLORS.map(col=>`<div class="color-choice ${col===selectedColor?'selected':''}" style="background:${col}" data-col="${col}"></div>`).join('')}
+        </div>
+
+        <button class="primary" id="saveClientBtn">Enregistrer</button>
+      </div>`;
+    document.body.appendChild(modal);
+
+    modal.querySelectorAll('.color-choice').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        selectedColor=el.getAttribute('data-col');
+        modal.querySelectorAll('.color-choice').forEach(x=>x.classList.remove('selected'));
+        el.classList.add('selected');
+      });
+    });
+
+    modal.querySelector('#saveClientBtn').addEventListener('click', ()=>{
+      const data={
+        name: modal.querySelector('#clName').value.trim(),
+        siret: modal.querySelector('#clSiret').value.trim(),
+        rate: modal.querySelector('#clRate').value.trim(),
+        phone: modal.querySelector('#clPhone').value.trim(),
+        email: modal.querySelector('#clEmail').value.trim(),
+        address: modal.querySelector('#clAddress').value.trim(),
+        zip: modal.querySelector('#clZip').value.trim(),
+        city: modal.querySelector('#clCity').value.trim(),
+        color: selectedColor
+      };
+      if(!data.name) return;
+      const arr=get(K.clients);
+      if(index===null) arr.push(data); else arr[index]=data;
+      set(K.clients,arr);
+      modal.remove();
+      showClients();
+    });
+  }
+
+  function openDeleteClientModal(i){
+    const clients=get(K.clients);
+    const c=clients[i];
+    const modal=document.createElement('div');
+    modal.className='modal';
+    modal.onclick=e=>{ if(e.target===modal) modal.remove(); };
+    modal.innerHTML=`
+      <div class="modal-content">
+        <div class="modal-header">
+          <button class="close-modal" onclick="this.closest('.modal').remove()">✕</button>
+          <h3>Supprimer ce client ?</h3>
+        </div>
+        <p><small>${c ? (c.name||'') : ''}</small></p>
+        <button class="primary" id="confirmDelClient">Supprimer</button>
+      </div>`;
+    document.body.appendChild(modal);
+    modal.querySelector('#confirmDelClient').addEventListener('click', ()=>{
+      const arr=get(K.clients);
+      arr.splice(i,1);
+      set(K.clients,arr);
+      modal.remove();
+      showClients();
+    });
+  }
+
+  /* PLANNING */
+  const planningState={month:'',client:'ALL'};
+
+  function formatDateFr(yyyy_mm_dd){
+    const d=new Date(yyyy_mm_dd);
+    return d.toLocaleDateString('fr-FR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'});
+  }
+  function computeMinutes(date,start,end,breakMin){
+    const s=new Date(`${date}T${start}`);
+    let e=new Date(`${date}T${end}`);
+    if(e < s) e.setDate(e.getDate()+1);
+    return Math.max(0, Math.round((e-s)/60000) - (parseInt(breakMin||0)||0));
+  }
+  function uuid(){ return 's_'+Math.random().toString(16).slice(2)+Date.now().toString(16); }
+
+  function showPlanning(){
+    const clients=get(K.clients);
+    const now=new Date();
+    const curMonth=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    if(!planningState.month) planningState.month=curMonth;
+
+    const clientOptions=['<option value="ALL">Toutes les entreprises</option>']
+      .concat(clients.map(c=>`<option value="${c.name}">${c.name}</option>`));
+
+    content.innerHTML=`
+      <div class="card">
+        <div class="row" style="align-items:center">
+          <div><strong>Planning</strong><br/><small>Trié par jour • plus récent en haut</small></div>
+        </div>
+        <details class="filters">
+          <summary>Filtres</summary>
+          <div>
+            <small>Mois</small>
+            <input type="month" id="plMonth" value="${planningState.month}" />
+            <small>Entreprise</small>
+            <select id="plClient">${clientOptions.join('')}</select>
+          </div>
+        </details>
+      </div>
+      <div id="planningList"></div>
+    `;
+
+    const monthEl=document.getElementById('plMonth');
+    const clientEl=document.getElementById('plClient');
+    clientEl.value=planningState.client;
+
+    monthEl.addEventListener('change', ()=>{ planningState.month=monthEl.value; renderPlanningList(); });
+    clientEl.addEventListener('change', ()=>{ planningState.client=clientEl.value; renderPlanningList(); });
+
+    renderPlanningList();
+    ensureFab('openShiftModal()');
+  }
+
+  function renderPlanningList(){
+    const clients=get(K.clients);
+    const shifts=get(K.shifts);
+
+    let filtered=shifts.slice();
+    if(planningState.month) filtered=filtered.filter(s=>(s.date||'').startsWith(planningState.month));
+    if(planningState.client!=='ALL') filtered=filtered.filter(s=>s.client===planningState.client);
+
+    filtered.sort((a,b)=>{
+      if(a.date!==b.date) return a.date<b.date?1:-1;
+      const as=a.start||''; const bs=b.start||'';
+      return as<bs?1:as>bs?-1:0;
+    });
+
+    const groups={};
+    filtered.forEach(s=>{ (groups[s.date] ||= []).push(s); });
+    const dates=Object.keys(groups).sort((a,b)=>a<b?1:-1);
+
+    const listEl=document.getElementById('planningList');
+    if(!listEl) return;
+
+    if(dates.length===0){
+      listEl.innerHTML='<div class="card"><small>Aucun shift pour ce filtre.</small></div>';
+      return;
+    }
+
+    let html='';
+    dates.forEach(date=>{
+      const dayMinutes=groups[date].reduce((sum,x)=>sum+(x.minutes||0),0);
+      const dayHours=(dayMinutes/60).toFixed(1);
+      html+=`
+        <div class="card">
+          <div class="row" style="align-items:center">
+            <div><strong>${formatDateFr(date)}</strong><br/><small>${groups[date].length} shift(s)</small></div>
+            <div style="text-align:right"><small>Total</small><div style="font-weight:700;font-size:1.05rem">${dayHours} h</div></div>
+          </div>
+      `;
+      groups[date].forEach(s=>{
+        const c=clients.find(x=>x.name===s.client);
+        const color=c?.color||COLORS[0];
+        const hours=(s.minutes/60).toFixed(1);
+        html+=`
+          <div style="margin-top:12px;border-top:1px solid rgba(255,255,255,.06);padding-top:12px">
+            <div class="row" style="align-items:center">
+              <div>
+                <span class="badge" style="background:${color}"></span><strong>${s.client}</strong><br/>
+                <small>${s.start} → ${s.end} • Pause ${s.breakMin||0} min • ${hours} h</small>
+              </div>
+              <div class="iconstack">
+                <button class="iconbtn" aria-label="Modifier" onclick="openShiftModal('${s.id}')">✎</button>
+                <button class="iconbtn danger" aria-label="Supprimer" onclick="openDeleteShiftModal('${s.id}')">🗑</button>
+              </div>
+            </div>
+          </div>
+        `;
+      });
+      html+='</div>';
+    });
+    listEl.innerHTML=html;
+  }
+
+  function openShiftModal(shiftId=null){
+    const clients=get(K.clients);
+    const shifts=get(K.shifts);
+    const existing=shiftId?shifts.find(s=>s.id===shiftId):null;
+
+    const today=new Date().toISOString().split('T')[0];
+    const date=existing?.date||today;
+    const client=existing?.client||(clients[0]?.name||'');
+    const start=existing?.start||'09:00';
+    const end=existing?.end||'17:00';
+    const breakMin=(existing?.breakMin ?? 0);
+
+    const modal=document.createElement('div');
+    modal.className='modal';
+    modal.onclick=e=>{ if(e.target===modal) modal.remove(); };
+
+    modal.innerHTML=`
+      <div class="modal-content">
+        <div class="modal-header">
+          <button class="close-modal" onclick="this.closest('.modal').remove()">✕</button>
+          <h3>${shiftId?('Modifier - '+client):'Nouveau shift'}</h3>
+        </div>
+
+        <h4>Client</h4>
+        <select id="shClient">${clients.map(c=>`<option value="${c.name}">${c.name}</option>`).join('')}</select>
+
+        <h4>Date</h4>
+        <input type="date" id="shDate" value="${date}" />
+
+        <h4>Horaires</h4>
+        <div class="row-nowrap">
+          <div>
+            <small>Début</small>
+            <input type="time" id="shStart" value="${start}" />
+          </div>
+          <div>
+            <small>Fin</small>
+            <input type="time" id="shEnd" value="${end}" />
+          </div>
+        </div>
+
+        <h4>Pause</h4>
+        <input type="number" id="shBreak" value="${breakMin}" />
+
+        <button class="primary" id="saveShiftBtn">Enregistrer</button>
+      </div>`;
+    document.body.appendChild(modal);
+
+    modal.querySelector('#shClient').value=client;
+
+    modal.querySelector('#saveShiftBtn').addEventListener('click', ()=>{
+      const sClient=modal.querySelector('#shClient').value;
+      const sDate=modal.querySelector('#shDate').value;
+      const sStart=modal.querySelector('#shStart').value;
+      const sEnd=modal.querySelector('#shEnd').value;
+      const sBreak=modal.querySelector('#shBreak').value;
+
+      if(!sClient||!sDate||!sStart||!sEnd) return;
+
+      const minutes=computeMinutes(sDate,sStart,sEnd,sBreak);
+      const payload={
+        id: shiftId || uuid(),
+        client:sClient,
+        date:sDate,
+        start:sStart,
+        end:sEnd,
+        breakMin:parseInt(sBreak||0)||0,
+        minutes
+      };
+
+      const all=get(K.shifts);
+      const idx=all.findIndex(x=>x.id===payload.id);
+      if(idx>=0) all[idx]=payload; else all.push(payload);
+      set(K.shifts,all);
+
+      modal.remove();
+      renderPlanningList();
+    });
+  }
+
+  function openDeleteShiftModal(shiftId){
+    const shifts=get(K.shifts);
+    const s=shifts.find(x=>x.id===shiftId);
+
+    const modal=document.createElement('div');
+    modal.className='modal';
+    modal.onclick=e=>{ if(e.target===modal) modal.remove(); };
+
+    modal.innerHTML=`
+      <div class="modal-content">
+        <div class="modal-header">
+          <button class="close-modal" onclick="this.closest('.modal').remove()">✕</button>
+          <h3>Supprimer ce shift ?</h3>
+        </div>
+        <p><small>${s?`${s.client} • ${s.date} • ${s.start}→${s.end}`:''}</small></p>
+        <button class="primary" id="confirmDelShift">Supprimer</button>
+      </div>`;
+    document.body.appendChild(modal);
+
+    modal.querySelector('#confirmDelShift').addEventListener('click', ()=>{
+      const all=get(K.shifts).filter(x=>x.id!==shiftId);
+      set(K.shifts,all);
+      modal.remove();
+      renderPlanningList();
+    });
+  }
+
+  /* BILLING (manual CA per client per month) */
+  const billingState={ month:'', year:'' };
+
+  function monthLabel(yyyy_mm){
+    if(!yyyy_mm) return '';
+    const [y,m]=yyyy_mm.split('-').map(n=>parseInt(n,10));
+    const d=new Date(y,(m||1)-1,1);
+    const label=d.toLocaleDateString('fr-FR',{month:'long',year:'numeric'});
+    return label.charAt(0).toUpperCase()+label.slice(1);
+  }
+  function getBilling(){ return JSON.parse(localStorage.getItem(K.billing)||'[]'); }
+  function setBilling(arr){ localStorage.setItem(K.billing, JSON.stringify(arr)); }
+  function billingForMonth(month){ return getBilling().filter(x=>x.month===month); }
+  function monthTotal(month){ return billingForMonth(month).reduce((s,x)=>s+(parseFloat(x.amount)||0),0); }
+  function listMonths(){
+    const months=[...new Set(getBilling().map(x=>x.month))].filter(Boolean);
+    months.sort((a,b)=>a<b?1:-1);
+    return months;
+  }
+  function sumByClientForYear(year){
+    const clients=get(K.clients);
+    const out={}; clients.forEach(c=>out[c.name]=0);
+    getBilling().forEach(x=>{
+      if((x.month||'').startsWith(year+'-')) out[x.client]=(out[x.client]||0)+(parseFloat(x.amount)||0);
+    });
+    return out;
+  }
+  function sumForQuarter(year,q){
+    const start=(q-1)*3+1;
+    const months=[start,start+1,start+2].map(m=>`${year}-${String(m).padStart(2,'0')}`);
+    const byClient={};
+    getBilling().forEach(x=>{
+      if(months.includes(x.month)) byClient[x.client]=(byClient[x.client]||0)+(parseFloat(x.amount)||0);
+    });
+    return { months, byClient, total:Object.values(byClient).reduce((a,b)=>a+b,0) };
+  }
+
+  function showBilling(){
+    const now=new Date();
+    const curMonth=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    if(!billingState.month) billingState.month=curMonth;
+    if(!billingState.year) billingState.year=String(now.getFullYear());
+
+    const total=monthTotal(billingState.month);
+
+    content.innerHTML=`
+      <div class="card">
+        <div class="row" style="align-items:center">
+          <div><strong>Facturation</strong><br/><small>Suivi manuel par client • URSSAF</small></div>
+        </div>
+        <details class="filters">
+          <summary>Période</summary>
+          <div>
+            <small>Mois</small>
+            <input type="month" id="billMonth" value="${billingState.month}" />
+            <small>Année</small>
+            <input type="number" id="billYear" value="${billingState.year}" min="2000" max="2100" />
+          </div>
+        </details>
+      </div>
+
+      <div class="card">
+        <div class="row" style="align-items:center">
+          <div><strong>${monthLabel(billingState.month)}</strong><br/><small>Total du mois</small></div>
+          <div style="text-align:right"><div style="font-weight:800;font-size:1.2rem">${total.toFixed(2)} €</div></div>
+        </div>
+        <div style="margin-top:12px">
+          <button class="primary" onclick="openBillingMonthModal('${billingState.month}')">Détails par client</button>
+          <button class="secondary" style="margin-top:10px" onclick="openBillingPickMonthModal()">Saisir un autre mois</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <strong>Historique</strong><br/><small>Derniers mois saisis</small>
+        <div style="margin-top:12px" id="billingHistory"></div>
+      </div>
+
+      <div class="card">
+        <strong>Récap annuel</strong><br/><small>Total et par client</small>
+        <div style="margin-top:12px" id="billingAnnual"></div>
+      </div>
+
+      <div class="card">
+        <strong>Récap trimestriel (URSSAF)</strong><br/><small>Q1 / Q2 / Q3 / Q4</small>
+        <div style="margin-top:12px" id="billingQuarterly"></div>
+      </div>
+    `;
+
+    const mEl=document.getElementById('billMonth');
+    const yEl=document.getElementById('billYear');
+    mEl.addEventListener('change', ()=>{ billingState.month=mEl.value; showBilling(); });
+    yEl.addEventListener('change', ()=>{ billingState.year=String(yEl.value||now.getFullYear()); renderBillingSummaries(); });
+
+    renderBillingHistory();
+    renderBillingSummaries();
+    ensureFab(null);
+  }
+
+  function renderBillingHistory(){
+    const el=document.getElementById('billingHistory');
+    if(!el) return;
+    const months=listMonths().slice(0,8);
+    if(months.length===0){
+      el.innerHTML="<small>Aucun mois enregistré pour l'instant.</small>";
+      return;
+    }
+    el.innerHTML=months.map(m=>{
+      const t=monthTotal(m).toFixed(2);
+      return `<div style="padding:10px;border-top:1px solid rgba(255,255,255,.06);display:flex;justify-content:space-between;align-items:center">
+        <div><small>${monthLabel(m)}</small></div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <small style="font-weight:700">${t} €</small>
+          <button class="iconbtn" onclick="selectBillingMonth('${m}')">→</button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+  function selectBillingMonth(m){ billingState.month=m; showBilling(); }
+
+  function renderBillingSummaries(){
+    const year=billingState.year;
+    const clients=get(K.clients);
+
+    const annualEl=document.getElementById('billingAnnual');
+    if(annualEl){
+      const byClient=sumByClientForYear(year);
+      const total=Object.values(byClient).reduce((a,b)=>a+b,0);
+      let html=`<div class="row"><div><small>Année ${year}</small></div><div style="font-weight:800">${total.toFixed(2)} €</div></div>`;
+      clients.forEach(c=>{
+        const v=(byClient[c.name]||0).toFixed(2);
+        html+=`<div style="margin-top:10px;border-top:1px solid rgba(255,255,255,.06);padding-top:10px" class="row">
+          <div><span class="badge" style="background:${c.color||COLORS[0]}"></span><small>${c.name}</small></div>
+          <div><small style="font-weight:700">${v} €</small></div>
+        </div>`;
+      });
+      annualEl.innerHTML=html;
+    }
+
+    const qEl=document.getElementById('billingQuarterly');
+    if(qEl){
+      let html='';
+      [1,2,3,4].forEach(q=>{
+        const qd=sumForQuarter(year,q);
+        const qTotal=qd.total.toFixed(2);
+        html+=`<details class="filters" style="margin-top:10px">
+          <summary>Q${q} • ${qTotal} €</summary>
+          <div>
+            <small>${qd.months.map(monthLabel).join(' • ')}</small>
+            ${clients.map(c=>{
+              const v=(qd.byClient[c.name]||0).toFixed(2);
+              return `<div style="margin-top:10px;border-top:1px solid rgba(255,255,255,.06);padding-top:10px" class="row">
+                <div><span class="badge" style="background:${c.color||COLORS[0]}"></span><small>${c.name}</small></div>
+                <div><small style="font-weight:700">${v} €</small></div>
+              </div>`;
+            }).join('')}
+          </div>
+        </details>`;
+      });
+      qEl.innerHTML=html;
+    }
+  }
+
+  function openBillingPickMonthModal(){
+    const now=new Date();
+    const curMonth=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    const modal=document.createElement('div');
+    modal.className='modal';
+    modal.onclick=e=>{ if(e.target===modal) modal.remove(); };
+    modal.innerHTML=`
+      <div class="modal-content">
+        <div class="modal-header">
+          <button class="close-modal" onclick="this.closest('.modal').remove()">✕</button>
+          <h3>Choisir un mois</h3>
+        </div>
+        <small>Tu peux saisir des mois passés ou futurs.</small>
+        <div style="margin-top:12px">
+          <input type="month" id="pickBillMonth" value="${billingState.month||curMonth}" />
+        </div>
+        <button class="primary" id="pickBillGo">Continuer</button>
+      </div>`;
+    document.body.appendChild(modal);
+
+    modal.querySelector('#pickBillGo').addEventListener('click', ()=>{
+      const m=modal.querySelector('#pickBillMonth').value;
+      if(!m) return;
+      billingState.month=m;
+      modal.remove();
+      // update page then open entry
+      showBilling();
+      openBillingMonthModal(m);
+    });
+  }
+
+  function openBillingMonthModal(month){
+    const clients=get(K.clients);
+    const existing=billingForMonth(month);
+    const map={}; existing.forEach(x=>map[x.client]=parseFloat(x.amount)||0);
+
+    const modal=document.createElement('div');
+    modal.className='modal';
+    modal.onclick=e=>{ if(e.target===modal) modal.remove(); };
+
+    modal.innerHTML=`
+      <div class="modal-content">
+        <div class="modal-header">
+          <button class="close-modal" onclick="this.closest('.modal').remove()">✕</button>
+          <h3>Détails • ${monthLabel(month)}</h3>
+        </div>
+        <small>Entre tes montants facturés (CA) par client.</small>
+
+        <div style="margin-top:14px">
+          ${clients.map(c=>`
+            <div style="margin-top:12px;border-top:1px solid rgba(255,255,255,.06);padding-top:12px">
+              <div class="row" style="align-items:center">
+                <div><span class="badge" style="background:${c.color||COLORS[0]}"></span><strong>${c.name}</strong></div>
+                <div style="min-width:120px;text-align:right"><small>€</small></div>
+              </div>
+              <input type="number" step="0.01" data-client="${c.name}" value="${(map[c.name]??'')}" placeholder="Montant" />
+            </div>
+          `).join('')}
+        </div>
+
+        <button class="primary" id="saveBillingMonth">Enregistrer</button>
+      </div>`;
+    document.body.appendChild(modal);
+
+    modal.querySelector('#saveBillingMonth').addEventListener('click', ()=>{
+      let all=getBilling().filter(x=>x.month!==month);
+      modal.querySelectorAll('input[data-client]').forEach(inp=>{
+        const client=inp.getAttribute('data-client');
+        const amount=parseFloat(inp.value);
+        if(!isNaN(amount) && amount>0){
+          all.push({month,client,amount});
+        }
+      });
+      setBilling(all);
+      modal.remove();
+      showBilling();
+    });
+  }
+
+  /* SETTINGS */
+  function showSettings(){
+    const s=JSON.parse(localStorage.getItem(K.settings)||'{}');
+    content.innerHTML=`
+      <div class="card">
+        <h3>Application</h3>
+        <input placeholder="Nom de l'application" value="${s.appName||''}" id="appNameInp" />
+        <button class="primary" id="toggleThemeBtn">🌗 Thème sombre/clair</button>
+      </div>
+    `;
+    document.getElementById('appNameInp').addEventListener('input', (e)=>{
+      const st=JSON.parse(localStorage.getItem(K.settings)||'{}');
+      st.appName=e.target.value;
+      localStorage.setItem(K.settings, JSON.stringify(st));
+      applySettings();
+    });
+    document.getElementById('toggleThemeBtn').addEventListener('click', ()=>{
+      const st=JSON.parse(localStorage.getItem(K.settings)||'{}');
+      st.theme = (st.theme==='light') ? 'dark' : 'light';
+      localStorage.setItem(K.settings, JSON.stringify(st));
+      applySettings();
+    });
+    ensureFab(null);
+  }
+
+  applySettings();
+  showHome();
+
+  // PWA: register service worker (offline cache)
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js').catch(()=>{});
+    });
+  }
+
+</script>
+</body>
+</html>
