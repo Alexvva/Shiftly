@@ -19,10 +19,47 @@
     header small{color:var(--muted)}
     main{padding:16px;padding-bottom:110px}
 
-    nav{display:flex;justify-content:space-around;position:fixed;bottom:0;width:100%;
-      background:var(--card);padding:8px 0;border-top:1px solid var(--line)}
-    nav button{background:none;border:none;color:var(--text);font-size:1rem;display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer}
-    nav button span{font-size:.9rem}
+nav{
+  display:flex;
+  justify-content:space-around;
+  position:fixed;
+  bottom:0;
+  width:100%;
+  background:var(--card);
+  padding:14px 0;                /* ⬅️ menu plus haut */
+  border-top:1px solid var(--line)
+}
+
+nav button{
+  background:none;
+  border:none;
+  color:var(--text);
+
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+
+  gap:6px;                       /* ⬅️ espace icône / texte */
+  cursor:pointer;
+
+  min-width:64px;                /* ⬅️ zone cliquable large */
+  min-height:56px;               /* ⬅️ zone cliquable haute */
+  padding:10px 14px;             /* ⬅️ bouton plus gros */
+
+  font-size:1.25rem;             /* ⬅️ icônes plus grandes */
+  border-radius:14px;
+}
+
+nav button span{
+  font-size:0.95rem;             /* ⬅️ texte plus lisible */
+  line-height:1;
+  color:var(--muted);
+}
+
+nav button:active{
+  transform:scale(0.97);
+}
 
     .card{background:var(--card);border-radius:16px;padding:16px;margin-bottom:16px}
     .row{display:flex;justify-content:space-between;align-items:center;gap:12px}
