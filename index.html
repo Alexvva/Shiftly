@@ -99,6 +99,15 @@
   const SUPABASE_URL = "https://uwxwcmouominwzfqucxj.supabase.com";
   const SUPABASE_ANON_KEY = "sb_publishable_9gj_xTjHYg4uUvOm8oIgSw_Dju5VK2w";
 
+  
+  // Client Supabase (nom unique)
+window.supabaseClient = window.supabaseClient.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+function supabaseReady(){
+  return !!window.supabaseClient;
+}
+
+
   // IMPORTANT: une seule déclaration de supabase dans tout le fichier
   let supabaseClient = null;
   let cloudUser = null;
