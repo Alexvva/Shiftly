@@ -1,9 +1,13 @@
-<!DOCTYPE html> 
+<!DOCTYPE html>
 <html lang="fr">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Shiftly</title>
+
+  <!-- Supabase client -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
   <style>
     :root{
       --bg:#0f172a;--card:#020617;--text:#e5e7eb;--muted:#94a3b8;--accent:#2563eb;
@@ -19,48 +23,17 @@
     header small{color:var(--muted)}
     main{padding:16px;padding-bottom:130px}
 
-
-nav{
-  display:flex;
-  justify-content:space-around;
-  position:fixed;
-  bottom:0;
-  width:100%;
-  background:var(--card);
-  padding:14px 0;                /* ⬅️ menu plus haut */
-  border-top:1px solid var(--line)
-}
-
-nav button{
-  background:none;
-  border:none;
-  color:var(--text);
-
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  justify-content:center;
-
-  gap:6px;                       /* ⬅️ espace icône / texte */
-  cursor:pointer;
-
-  min-width:64px;                /* ⬅️ zone cliquable large */
-  min-height:56px;               /* ⬅️ zone cliquable haute */
-  padding:10px 14px;             /* ⬅️ bouton plus gros */
-
-  font-size:1.25rem;             /* ⬅️ icônes plus grandes */
-  border-radius:14px;
-}
-
-nav button span{
-  font-size:0.95rem;             /* ⬅️ texte plus lisible */
-  line-height:1;
-  color:var(--muted);
-}
-
-nav button:active{
-  transform:scale(0.97);
-}
+    nav{display:flex;justify-content:space-around;position:fixed;bottom:0;width:100%;
+      background:var(--card);padding:14px 0;border-top:1px solid var(--line)}
+    nav button{
+      background:none;border:none;color:var(--text);
+      display:flex;flex-direction:column;align-items:center;justify-content:center;
+      gap:6px;cursor:pointer;
+      min-width:64px;min-height:56px;padding:10px 14px;border-radius:14px;
+      font-size:1.25rem;
+    }
+    nav button span{font-size:0.95rem;line-height:1;color:var(--muted)}
+    nav button:active{transform:scale(0.97)}
 
     .card{background:var(--card);border-radius:16px;padding:16px;margin-bottom:16px}
     .row{display:flex;justify-content:space-between;align-items:center;gap:12px}
@@ -120,12 +93,114 @@ nav button:active{
 </nav>
 
 <script>
+  // =========================
+  // SUPABASE CONFIG (UNE SEULE DECLARATION)
+  // =========================
+  const SUPABASE_URL = "https://uwxwcmouominwzfqucxj.supabase.com";
+  const SUPABASE_ANON_KEY = "sb_publishable_9gj_xTjHYg4uUvOm8oIgSw_Dju5VK2w";
+
+  // IMPORTANT: une seule déclaration de supabase dans tout le fichier
+  let supabaseClient = null;
+  let cloudUser = null;
+  let cloudSaveTimer = null;
+  let lastCloudPayloadHash = "";
+
+  function supabaseReady(){
+    return !!supabaseClient;
+  }
+
+  try{
+    if(window.supabase?.createClient){
+      supabaseClient = window.supabaseClient.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    }
+  }catch(e){
+    supabase = null;
+  }
+
+  // Keys
   const K={clients:'clients',shifts:'shifts',billing:'billing',settings:'settings'};
   const COLORS=['#2563eb','#16a34a','#dc2626','#d97706','#7c3aed','#0d9488','#db2777','#475569'];
 
   const content=document.getElementById('content');
   const get=(k)=>JSON.parse(localStorage.getItem(k)||'[]');
   const set=(k,v)=>localStorage.setItem(k,JSON.stringify(v));
+
+  // ==========
+  // CLOUD BACKUP
+  // ==========
+  function buildPayload(){
+    return {
+      version: 1,
+      savedAt: new Date().toISOString(),
+      data: {
+        clients: get(K.clients),
+        shifts: get(K.shifts),
+        billing: getBilling(),
+        settings: JSON.parse(localStorage.getItem(K.settings) || "{}")
+      }
+    };
+  }
+
+  function hashPayload(p){
+    try{
+      const s = JSON.stringify(p.data || {});
+      return String(s.length) + ":" + String(s.slice(0,40));
+    }catch{
+      return String(Date.now());
+    }
+  }
+
+  function scheduleCloudSave(){
+    if(!supabaseReady() || !cloudUser) return;
+
+    clearTimeout(cloudSaveTimer);
+    cloudSaveTimer = setTimeout(async ()=>{
+      const payload = buildPayload();
+      const h = hashPayload(payload);
+      if(h === lastCloudPayloadHash) return;
+
+      const { error } = await supabase
+        .from("user_backups")
+        .upsert({ user_id: cloudUser.id, payload, updated_at: new Date().toISOString() });
+
+      if(!error){
+        lastCloudPayloadHash = h;
+      }
+    }, 800);
+  }
+
+  async function cloudRestoreIfAny(){
+    if(!supabaseReady() || !cloudUser) return;
+
+    const { data, error } = await supabase
+      .from("user_backups")
+      .select("payload")
+      .eq("user_id", cloudUser.id)
+      .single();
+
+    if(error || !data?.payload) return;
+
+    const remote = data.payload?.data;
+    if(!remote) return;
+
+    if(remote.clients) set(K.clients, remote.clients);
+    if(remote.shifts) set(K.shifts, remote.shifts);
+    if(remote.billing) localStorage.setItem(K.billing, JSON.stringify(remote.billing));
+    if(remote.settings) localStorage.setItem(K.settings, JSON.stringify(remote.settings));
+
+    applySettings();
+  }
+
+  async function refreshAuthAndSync(){
+    if(!supabaseReady()) return;
+
+    const { data } = await supabaseClient.auth.getUser();
+    cloudUser = data?.user || null;
+    if(cloudUser){
+      await cloudRestoreIfAny();
+      scheduleCloudSave();
+    }
+  }
 
   function monthLabel(yyyy_mm){
     if(!yyyy_mm) return '';
@@ -274,7 +349,6 @@ nav button:active{
         </div>
       </div>
     `;
-    // Add shift immediately available
     ensureFab('openShiftModal()');
   }
 
@@ -367,6 +441,7 @@ nav button:active{
       const arr=get(K.clients);
       if(index===null) arr.push(data); else arr[index]=data;
       set(K.clients,arr);
+      scheduleCloudSave();
       modal.remove();
       showClients();
     });
@@ -392,6 +467,7 @@ nav button:active{
       const arr=get(K.clients);
       arr.splice(i,1);
       set(K.clients,arr);
+      scheduleCloudSave();
       modal.remove();
       showClients();
     });
@@ -581,6 +657,7 @@ nav button:active{
       const idx=all.findIndex(x=>x.id===payload.id);
       if(idx>=0) all[idx]=payload; else all.push(payload);
       set(K.shifts,all);
+      scheduleCloudSave();
 
       modal.remove();
       if(document.getElementById('planningList')) renderPlanningList();
@@ -610,6 +687,7 @@ nav button:active{
     modal.querySelector('#confirmDelShift').addEventListener('click', ()=>{
       const all=get(K.shifts).filter(x=>x.id!==shiftId);
       set(K.shifts,all);
+      scheduleCloudSave();
       modal.remove();
       renderPlanningList();
     });
@@ -673,7 +751,6 @@ nav button:active{
   function setBillingMode(mode){
     billingState.mode=mode;
     renderBillingBody();
-    // update button states
     const m=document.getElementById('bModeM');
     const q=document.getElementById('bModeQ');
     const a=document.getElementById('bModeA');
@@ -776,7 +853,6 @@ nav button:active{
       return;
     }
 
-    // quarterly
     body.innerHTML=`
       <div class="card">
         <div class="row">
@@ -907,9 +983,9 @@ nav button:active{
         }
       });
       setBilling(all);
+      scheduleCloudSave();
       modal.remove();
       renderBillingBody();
-      // refresh Home numbers if needed
     });
   }
 
@@ -919,6 +995,17 @@ nav button:active{
     const p=s.profile||{};
 
     content.innerHTML=`
+      <div class="card">
+        <strong>Compte</strong><br/>
+        <small>Connexion pour activer la sauvegarde cloud</small>
+        <div style="margin-top:12px">
+          <input id="authEmail" placeholder="Email" />
+          <button class="primary" id="loginBtn">Recevoir un lien de connexion</button>
+          <button class="ghost" style="margin-top:10px" id="logoutBtn">Se déconnecter</button>
+          <div style="margin-top:10px"><small id="authStatus">Chargement…</small></div>
+        </div>
+      </div>
+
       <div class="card">
         <strong>Profil</strong><br/>
         <small>Référence (identité, facturation, etc.)</small>
@@ -995,6 +1082,47 @@ nav button:active{
       </div>
     `;
 
+    // --- AUTH UI ---
+    const authStatus = document.getElementById('authStatus');
+
+    // Si Supabase n'est pas prêt, on n'attache pas d'events (sinon plantage)
+    if(!supabaseReady()){
+      authStatus.textContent = 'Cloud non disponible (Supabase non chargé)';
+      document.getElementById('loginBtn').disabled = true;
+      document.getElementById('logoutBtn').disabled = true;
+    } else {
+      async function refreshAuthStatus(){
+        const { data } = await supabaseClient.auth.getUser();
+        cloudUser = data?.user || null;
+        authStatus.textContent = cloudUser ? `Connecté : ${cloudUser.email}` : 'Non connecté';
+        if(cloudUser){
+          await cloudRestoreIfAny();
+          scheduleCloudSave();
+        }
+      }
+
+      document.getElementById('loginBtn').addEventListener('click', async ()=>{
+        const email = document.getElementById('authEmail').value.trim();
+        if(!email) return;
+        const { error } = await supabaseClient.auth.signInWithOtp({ email });
+        if(error) openInfoModal('Erreur', 'Connexion impossible. Vérifie Supabase Auth + URL.');
+        else openInfoModal('Email envoyé', 'Ouvre le lien reçu pour te connecter.');
+      });
+
+      document.getElementById('logoutBtn').addEventListener('click', async ()=>{
+        await supabaseClient.auth.signOut();
+        cloudUser = null;
+        authStatus.textContent = 'Non connecté';
+      });
+
+      supabaseClient.auth.onAuthStateChange(async ()=>{
+        await refreshAuthStatus();
+      });
+
+      refreshAuthStatus();
+    }
+
+    // --- SETTINGS UI ---
     document.getElementById('setWeekStart').value=s.weekStart||'monday';
     document.getElementById('setTimeFmt').value=s.timeFormat||'24';
     document.getElementById('setCurrency').value=s.currency||'EUR';
@@ -1011,6 +1139,7 @@ nav button:active{
         city: document.getElementById('pfCity').value.trim(),
       };
       localStorage.setItem(K.settings, JSON.stringify(st));
+      scheduleCloudSave();
       applySettings();
       openInfoModal('Enregistré','Profil mis à jour.');
     });
@@ -1038,7 +1167,7 @@ nav button:active{
       const url=URL.createObjectURL(blob);
       const a=document.createElement('a');
       a.href=url;
-      a.download=`planning-pro-export-${new Date().toISOString().slice(0,10)}.json`;
+      a.download=`shiftly-export-${new Date().toISOString().slice(0,10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
     });
@@ -1056,6 +1185,7 @@ nav button:active{
         if(d.shifts) set(K.shifts,d.shifts);
         if(d.billing) localStorage.setItem(K.billing,JSON.stringify(d.billing));
         if(d.settings) localStorage.setItem(K.settings,JSON.stringify(d.settings));
+        scheduleCloudSave();
         applySettings();
         showSettings();
         openInfoModal('Import réussi','Les données ont été importées.');
@@ -1074,6 +1204,7 @@ nav button:active{
     const s=JSON.parse(localStorage.getItem(K.settings)||'{}');
     s[k]=v;
     localStorage.setItem(K.settings,JSON.stringify(s));
+    scheduleCloudSave();
     applySettings();
   }
 
@@ -1097,6 +1228,7 @@ nav button:active{
       localStorage.removeItem(K.clients);
       localStorage.removeItem(K.shifts);
       localStorage.removeItem(K.billing);
+      scheduleCloudSave();
       modal.remove();
       showHome();
       openInfoModal('Réinitialisé','Les données ont été supprimées.');
@@ -1106,6 +1238,9 @@ nav button:active{
   // Init
   applySettings();
   showHome();
+
+  // Au démarrage : si déjà connecté, restore auto
+  refreshAuthAndSync();
 </script>
 </body>
 </html>
