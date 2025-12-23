@@ -100,11 +100,31 @@
   const SUPABASE_ANON_KEY = "sb_publishable_9gj_xTjHYg4uUvOm8oIgSw_Dju5VK2w";
 
   // IMPORTANT: on n'utilise JAMAIS une variable appelée "supabase"
-  window.supabaseClient = null;
+// IMPORTANT: on n'utilise JAMAIS une variable appelée "supabase"
+window.supabaseClient = null;
 
-  function supabaseReady(){
-    return !!window.supabaseClient;
+function initSupabaseOnce(){
+  if (window.supabaseClient) return true;
+  if (window.supabase?.createClient) {
+    window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    return true;
   }
+  return false;
+}
+
+// attend que la lib soit prête (au cas où elle arrive après)
+async function waitSupabaseReady(timeoutMs = 3000){
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (initSupabaseOnce()) return true;
+    await new Promise(r => setTimeout(r, 50));
+  }
+  return initSupabaseOnce();
+}
+
+function supabaseReady(){
+  return !!window.supabaseClient;
+}
 
   // Initialisation sûre (ne plante jamais l'app)
   try{
@@ -1094,21 +1114,54 @@
 
     const authStatus = document.getElementById('authStatus');
 
-    // AUTH (pas de "supabase non chargé": on montre l'état réel)
-    if(!supabaseReady()){
-      authStatus.textContent = "Cloud indisponible (lib Supabase non chargée)";
-      document.getElementById('loginBtn').disabled = true;
-      document.getElementById('logoutBtn').disabled = true;
+// AUTH – initialisation robuste (attend Supabase si nécessaire)
+authStatus.textContent = "Connexion…";
+
+waitSupabaseReady(3000).then(async (ok)=>{
+  if(!ok){
+    authStatus.textContent = "Cloud indisponible (lib Supabase introuvable)";
+    document.getElementById('loginBtn').disabled = true;
+    document.getElementById('logoutBtn').disabled = true;
+    return;
+  }
+
+  async function refreshAuthStatus(){
+    const { data } = await window.supabaseClient.auth.getUser();
+    cloudUser = data?.user || null;
+    authStatus.textContent = cloudUser
+      ? `Connecté : ${cloudUser.email}`
+      : "Non connecté";
+
+    if(cloudUser){
+      await cloudRestoreIfAny();
+      scheduleCloudSave();
+    }
+  }
+
+  document.getElementById('loginBtn').addEventListener('click', async ()=>{
+    const email = document.getElementById('authEmail').value.trim();
+    if(!email) return;
+    const { error } = await window.supabaseClient.auth.signInWithOtp({ email });
+    if(error){
+      openInfoModal('Erreur', 'Connexion impossible.');
     } else {
-      async function refreshAuthStatus(){
-        const { data } = await window.supabaseClient.auth.getUser();
-        cloudUser = data?.user || null;
-        authStatus.textContent = cloudUser ? `Connecté : ${cloudUser.email}` : 'Non connecté';
-        if(cloudUser){
-          await cloudRestoreIfAny();
-          scheduleCloudSave();
-        }
-      }
+      openInfoModal('Email envoyé', 'Ouvre le lien reçu pour te connecter.');
+    }
+  });
+
+  document.getElementById('logoutBtn').addEventListener('click', async ()=>{
+    await window.supabaseClient.auth.signOut();
+    cloudUser = null;
+    authStatus.textContent = "Non connecté";
+  });
+
+  window.supabaseClient.auth.onAuthStateChange(async ()=>{
+    await refreshAuthStatus();
+  });
+
+  await refreshAuthStatus();
+});
+
 
       document.getElementById('loginBtn').addEventListener('click', async ()=>{
         const email = document.getElementById('authEmail').value.trim();
